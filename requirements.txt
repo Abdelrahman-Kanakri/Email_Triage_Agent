@@ -1,0 +1,15 @@
+langgraph
+langchain
+langchain-openai
+guardrails-ai
+presidio-analyzer
+presidio-anonymizer
+fastapi
+uvicorn[standard]
+sse-starlette
+pydantic>=2
+python-dotenv
+langsmith
+structlog
+pytest
+httpx
