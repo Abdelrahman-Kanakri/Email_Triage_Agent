@@ -1,5 +1,5 @@
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -46,9 +46,18 @@ class ClassifierResult(BaseModel):
     """
     Represents the result of a classification operation on an email.
     """
-    is_injection: bool = Field(...,
-                        description="Indicates whether the email is classified as an injection.")
-
+    # Originally `is_injection: bool` (Phase 1 threat-model lock: classifier's
+    # only output is a yes/no flag). Replaced with this 3-way Literal once
+    # INJECTION_DETECTION_PROMPT was written to return "ambiguous" as a real,
+    # distinct verdict (encoded/gibberish content, not provably malicious) --
+    # collapsing that into the boolean would throw away exactly the label
+    # Phase 3's false-positive-rate measurement needs to tell "confident
+    # detection" apart from "erred cautious." Whether "ambiguous" is treated
+    # as unsafe is a policy decision for the node that reads this result, not
+    # something baked into the classifier itself.
+    injection_type: Literal["injection", "clean", "ambiguous"] = Field(...,
+                        description="The type of injection, if applicable.")
+    
 class RejectionRecord(BaseModel):
     """
     Represents a record of a rejected email, including the email itself and the reason for rejection.
