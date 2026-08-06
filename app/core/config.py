@@ -4,8 +4,8 @@ Import the module-level ``settings`` singleton — never instantiate ``Settings`
 directly elsewhere, as that would bypass the singleton and re-read the file.
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -37,18 +37,13 @@ class Settings(BaseSettings):
     MEDIUM_MODEL_NAME: str = Field(..., env="MEDIUM_MODEL_NAME")
     SMALL_MODEL_NAME: str = Field(..., env="SMALL_MODEL_NAME")
     MISTRAL_EMBEDDING_MODEL_NAME: str = Field(..., env="MISTRAL_EMBEDDING_MODEL_NAME")
-
-    # ── Groq API & Models Names ─────────────────────────────────────────────────────────────
-    GROQ_API_KEY: str = Field(..., env="GROQ_API_KEY")
-    GROQ_MODEL_NAME: str = Field(..., env="GROQ_MODEL_NAME")
-
-    # ── Google API & Model Names ─────────────────────────────────────────────────────────────
-    GOOGLE_API_KEY: str = Field(..., env="GOOGLE_API_KEY")
-    GOOGLE_MODEL_NAME: str = Field(..., env="GOOGLE_MODEL_NAME")
-
+    
     # ── Emails Data Path ─────────────────────────────────────────────────────────────
     EMAILS_DATA_PATH: str = Field(..., env="EMAILS_DATA_PATH")
+    
+    # ── PII HMAC Secret ─────────────────────────────────────────────────────────────
+    PII_HMAC_SECRET: str = Field(..., env="PII_HMAC_SECRET")
 
 
-
+# MAIN
 settings = Settings()

@@ -1,13 +1,19 @@
+"""
+"""
 import re
 
 from langchain_mistralai import ChatMistralAI
+from structlog.types import FilteringBoundLogger
 
-from app.core import get_logger, settings
+from app.core import settings
 from app.graph.prompts import INJECTION_DETECTION_PROMPT
 from app.graph.state import ClassifierResult, Email
 
-# Logger for this module
-logger = get_logger(__name__)
+
+# a function to create a Logger for this module
+def create_logger() -> FilteringBoundLogger:
+    from app.core import get_logger
+    return get_logger(__name__)
 
 # Define the LLM for injection detection with the SchemaModel output parser
 model = ChatMistralAI(
@@ -17,6 +23,7 @@ model = ChatMistralAI(
 )
 # wrap the model with structured output to ensure it returns a ClassifierResult
 model_with_structured_output = model.with_structured_output(ClassifierResult)
+
 def get_injection_type(email: Email) -> str:
     """
     A function that returns the injection type based on the input email.
@@ -26,6 +33,7 @@ def get_injection_type(email: Email) -> str:
         - "injection" if the input email is "injection"
         - "ambiguous" if the input email is "ambiguous"    
     """
+    logger = create_logger()
     # Check if the inbox is empty and raise an error if it is
     if not email.body:
         raise ValueError("Email is empty. Cannot determine injection type.")

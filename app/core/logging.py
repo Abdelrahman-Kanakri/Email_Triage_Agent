@@ -1,9 +1,12 @@
 """Structured JSON logging configuration using structlog."""
 
 import logging
+from pathlib import Path
+
 import structlog
 from structlog.types import FilteringBoundLogger
-from pathlib import Path
+
+from app.guardrails import redact_pii
 
 # ── Configuration ───────────────────────────────────────────────────────────
 LOG_DIR = Path("logs")
@@ -36,6 +39,8 @@ structlog.configure(
         structlog.dev.set_exc_info,
         # Standard ISO 8601 timestamp format is preferred in production (e.g., for ELK/Splunk)
         structlog.processors.TimeStamper(fmt="iso", utc=True),
+        # Redacts PII from the log messages
+        redact_pii,
         # Renders the final output as a JSON string
         structlog.processors.JSONRenderer(),
     ],
