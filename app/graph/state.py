@@ -1,6 +1,22 @@
+"""State schema for the email triage agent.
+
+Five Pydantic `BaseModel`s (`Email`, `Draft`, `FlaggedEmail`,
+`ClassifierResult`, `RejectionRecord`) define the shape of individual
+pieces of data. `State` itself is a `TypedDict`, not a `BaseModel` --
+LangGraph's field reducers (`Annotated[list, ...]`) only attach to
+TypedDict fields, and a plain node return can't mutate a TypedDict on
+its own (see `app/tools/email_ops.py`'s `Command(update=...)` pattern
+for how tools write into it instead).
+
+`State`'s keys are data needs, not FSM state names -- the six Phase 1
+FSM states (`unauthenticated`, `reading`, ...) live in
+`app/tools/registry.py`'s `TOOL_PERMISSIONS`, a separate mapping.
+"""
 import operator
 from typing import Annotated, Literal, TypedDict
 
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 
@@ -42,6 +58,13 @@ class FlaggedEmail(BaseModel):
     category: str = Field(...,
                     description="Category of the flagged email, if applicable.")
 
+class SmallFlaggedEmail(BaseModel):
+    """
+    Represents a flagged email with only the reason.
+    """
+    reason: str = Field(...,
+                        description="Reason for flagging the email message.")
+
 class ClassifierResult(BaseModel):
     """
     Represents the result of a classification operation on an email.
@@ -78,4 +101,4 @@ class State(TypedDict):
     thread_history: list[str]
     flagged_emails: Annotated[list[FlaggedEmail], operator.add] 
     rejection_reasons: Annotated[list[RejectionRecord], operator.add] 
-
+    messages: Annotated[list[BaseMessage], add_messages]  # for tool messages, not user messages

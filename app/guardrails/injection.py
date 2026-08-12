@@ -1,4 +1,16 @@
-"""
+"""Prompt-injection / jailbreak guard, run inside the `reading` node.
+
+Two-tier check, cheap-deterministic-first: a regex scan for known
+injection/jailbreak patterns runs first and is trusted immediately on a
+match -- fast, free, and a deterministic pattern can't be talked out of
+a verdict the way an LLM theoretically could. A non-match is NOT treated
+as "clean" -- it only means this filter didn't catch anything, not that
+nothing is wrong -- so it escalates to `model_with_structured_output`,
+a tool-less classifier LLM call that is the real authority on
+"clean" vs. "ambiguous" vs. "injection".
+
+Never exposed as a tool (`.bind_tools()`) -- least privilege applied
+recursively, so even a successful injection here has nothing to call.
 """
 import re
 
@@ -65,6 +77,9 @@ def get_injection_type(email: Email) -> str:
         # now, not a bool) -- so injection_type is already guaranteed to be
         # exactly "clean"/"injection"/"ambiguous". No re-branching needed;
         # whatever the LLM decided is passed through as the final answer.
+        # A plain model.invoke(...) (no with_structured_output wrapper) would
+        # instead return an AIMessage, requiring .content to reach raw text --
+        # here injection_result is the ClassifierResult itself, read directly.
         injection_result = model_with_structured_output.invoke(
         INJECTION_DETECTION_PROMPT.format(email_body = email_body)
         )
