@@ -20,7 +20,7 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from app.core import get_logger, settings
-from app.graph.state import Email
+from app.graph.state import Email, State
 
 logger = get_logger(__name__)
 
@@ -50,6 +50,7 @@ def auth_tool_access(runtime: ToolRuntime) -> Command:
     — "auth_tool_access" (set explicitly above), not the function name
     `auth_tool`. Keep interrupt_on's key in sync with that string.
     """
+    logger.info("User authentication approved via human-in-the-loop.")
     return Command(
         update={
             "authenticated": True,
@@ -105,24 +106,40 @@ def fetch_inbox(runtime: ToolRuntime) -> Command:
         }
     )
 
-@tool("send_email", description = "Tool to send an email from the user's inbox.")
-def send_email(runtime: ToolRuntime) -> Command: 
+def send_email(state: State) -> dict:
+    """Sends the approved/edited draft as a reply to `current_email`.
+
+    Not a `@tool` -- deliberately. `registry.py`'s `TOOL_PERMISSIONS` never
+    lists `send_email` for any of the six FSM states, so no model ever
+    decides to call it; it's only ever invoked directly by the `sending`
+    node. Without a model-issued tool call there's no `tool_call_id` to
+    link a `ToolMessage`/`Command` back to, so this takes plain `state`
+    and returns a plain dict, the same shape as `guard`/`drafting`/
+    `awaiting_approval` -- not `runtime: ToolRuntime` and `Command`, which
+    only apply to tools a model actually invokes (`auth_tool_access`,
+    `fetch_inbox`, both bound above).
+
+    Sender/recipient are read from `current_email`, never from `Draft` --
+    same anti-injection design as everywhere else in this project:
+    `current_email.to` (the address the original mail was addressed to,
+    i.e. this agent's own address) becomes the outgoing sender;
+    `current_email.sender` (who originally wrote in) becomes the outgoing
+    recipient. A model-authored `Draft.recipient` is never trusted for
+    where the email actually goes.
+
+    No inbox/email-sending side effect actually wired up yet -- currently
+    logs the send. Returns `{}`: nothing about this action needs to be
+    written back into graph state.
     """
-    Sends an email from the user's inbox and updates the state.
-    """
-    subject = runtime.state["draft"].subject if runtime.state["draft"] else None
-    sender = runtime.state["current_email"].to if runtime.state["current_email"] else None
+    subject = state["draft"].subject if state["draft"] else None
+    sender = state["current_email"].to if state["current_email"] else None
     # for the reciepient, it does not matter from where to get it, 
     # either from the draft or the current email,
     # as the recipient is the sender of the current email.
-    recipient = runtime.state["current_email"].sender if runtime.state["current_email"] else None
+    recipient = state["current_email"].sender if state["current_email"] else None
     date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # noqa: DTZ005
-    body = runtime.state["draft"].body if runtime.state["draft"] else None
+    body = state["draft"].body if state["draft"] else None
     
     logger.info(f"Sending email from {sender} to {recipient} on {date} with the body: {body} and subject: {subject}.")
     
-    return Command(
-        update = {
-            "messages": [ToolMessage(content = f"Email sent from {sender} to {recipient} on {date} with the body: {body} and subject: {subject}.", tool_call_id = runtime.tool_call_id)]
-        }
-    )
+    return {}

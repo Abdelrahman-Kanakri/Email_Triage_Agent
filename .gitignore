@@ -11,3 +11,5 @@ dist/
 build/
 
 graphify-out
+
+logs

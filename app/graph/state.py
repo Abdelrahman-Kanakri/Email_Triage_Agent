@@ -11,6 +11,15 @@ for how tools write into it instead).
 `State`'s keys are data needs, not FSM state names -- the six Phase 1
 FSM states (`unauthenticated`, `reading`, ...) live in
 `app/tools/registry.py`'s `TOOL_PERMISSIONS`, a separate mapping.
+
+Access mechanism follows directly from the type: `state["current_email"]`
+works because `TypedDict` behaves like a dict at runtime (subscript /
+key access). Once you're holding one of the `BaseModel` instances above
+-- `current_email`, a `Draft`, a `RejectionRecord` -- switch to
+attribute access (`current_email.sender`, not `current_email["sender"]`);
+none of these models implement `__getitem__`, so bracket access on them
+raises `TypeError: not subscriptable`. Same word ("field") for both,
+different access syntax depending on which type you're holding.
 """
 import operator
 from typing import Annotated, Literal, TypedDict
@@ -37,6 +46,7 @@ class Email(BaseModel):
                     description="Email address of the recipient.")  
     date: str = Field(...,
                     description="Date and time when the email was sent.")
+
 class Draft(BaseModel): 
     """
     Represents a draft email message.
@@ -45,6 +55,15 @@ class Draft(BaseModel):
                     description="Subject line of the Draft.")
     recipient: str = Field(...,
                     description="Email address of the recipient.")
+    body: str = Field(...,
+                    description="Content of the draft email message.")
+
+class SmallDraft(BaseModel):
+    """
+    Represents a draft email message with only the subject and body.
+    """
+    subject: str = Field(...,
+                    description="Subject line of the Draft.")
     body: str = Field(...,
                     description="Content of the draft email message.")
 
