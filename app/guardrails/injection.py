@@ -14,7 +14,7 @@ recursively, so even a successful injection here has nothing to call.
 """
 import re
 
-from langchain_mistralai import ChatMistralAI
+from langchain_openai import ChatOpenAI
 from structlog.types import FilteringBoundLogger
 
 from app.core import settings
@@ -28,10 +28,10 @@ def create_logger() -> FilteringBoundLogger:
     return get_logger(__name__)
 
 # Define the LLM for injection detection with the SchemaModel output parser
-model = ChatMistralAI(
-    model_name=settings.MEDIUM_MODEL_NAME,
+model = ChatOpenAI(
+    model=settings.OPENAI_MINI_MODEL,
     temperature=0.0,
-    api_key=settings.MISTRAL_API_KEY,
+    api_key=settings.OPENAI_API_KEY.get_secret_value(),
 )
 # wrap the model with structured output to ensure it returns a ClassifierResult
 model_with_structured_output = model.with_structured_output(ClassifierResult)

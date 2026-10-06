@@ -3,8 +3,9 @@
 Import the module-level ``settings`` singleton — never instantiate ``Settings``
 directly elsewhere, as that would bypass the singleton and re-read the file.
 """
+import os
 
-from pydantic import Field
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,27 +24,32 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        case_sensitive=False,
+        
     )
     # ── LangSmith configurations ─────────────────────────────────────────────────────────────
-    LANGSMITH_API_KEY: str = Field(..., env="LANGSMITH_API_KEY")
-    LANGSMITH_ENDPOINT: str = Field(..., env="LANGSMITH_ENDPOINT")
-    LANGSMITH_TRACING: bool = Field(..., env="LANGSMITH_TRACING")
-    LANGSMITH_PROJECT: str = Field(..., env="LANGSMITH_PROJECT")
+    LANGSMITH_API_KEY: SecretStr  
+    LANGSMITH_ENDPOINT: str
+    LANGSMITH_TRACING: str
+    LANGSMITH_PROJECT: str 
 
-    # ── Mistral API & Models Names ─────────────────────────────────────────────────────────────
+    # ── OpenAI API & Models Names ─────────────────────────────────────────────────────────────
 
-    MISTRAL_API_KEY: str = Field(..., env="MISTRAL_API_KEY")
-    LARGE_MODEL_NAME: str = Field(..., env="LARGE_MODEL_NAME")
-    MEDIUM_MODEL_NAME: str = Field(..., env="MEDIUM_MODEL_NAME")
-    SMALL_MODEL_NAME: str = Field(..., env="SMALL_MODEL_NAME")
-    MISTRAL_EMBEDDING_MODEL_NAME: str = Field(..., env="MISTRAL_EMBEDDING_MODEL_NAME")
+    OPENAI_API_KEY: SecretStr
+    OPENAI_REGURAL_MODEL: str
+    OPENAI_MINI_MODEL: str
     
     # ── Emails Data Path ─────────────────────────────────────────────────────────────
-    EMAILS_DATA_PATH: str = Field(..., env="EMAILS_DATA_PATH")
+    EMAILS_DATA_PATH: str
     
     # ── PII HMAC Secret ─────────────────────────────────────────────────────────────
-    PII_HMAC_SECRET: str = Field(..., env="PII_HMAC_SECRET")
-
+    PII_HMAC_SECRET: SecretStr
 
 # MAIN
 settings = Settings()
+
+# Settings the observability 
+os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY.get_secret_value()
+os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
+os.environ["LANGSMITH_TRACING"] =  settings.LANGSMITH_TRACING
+os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT

@@ -14,7 +14,7 @@ node (classify one email, pick `current_email` or flag it) because a
 conditional edge can't write state. `done` is routing-only, mapped
 straight to `END` in `build.py`, nothing to execute.
 """
-from langchain_mistralai import ChatMistralAI
+from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
 from app.core import get_logger, settings
@@ -36,10 +36,10 @@ logger = get_logger(__name__)
 
 # -── Model with Tools ─────────────────────────────────────────────────────────────
 # Define the LLM for tool access with the SchemaModel output parser
-model = ChatMistralAI(
-    model = settings.MEDIUM_MODEL_NAME,
+model = ChatOpenAI(
+    model = settings.OPENAI_MINI_MODEL,
     temperature = 0.0,
-    api_key = settings.MISTRAL_API_KEY,
+    api_key = settings.OPENAI_API_KEY.get_secret_value(),
 )
 
 # Bind the model with the tools authorized for the node's state.

@@ -31,7 +31,7 @@ import re
 
 from app.core import settings
 
-secret_key = settings.PII_HMAC_SECRET.encode()
+
 def redact_pii(logger, method_name: str, event_dict: dict):
     """Replace every email address found in `event_dict`'s string values
     with its HMAC-SHA256 pseudonym. See module docstring for the full
@@ -42,7 +42,7 @@ def redact_pii(logger, method_name: str, event_dict: dict):
     for key, value in event_dict.items():
         if isinstance(value, str):
             msg = re.sub(pattern, lambda m: hmac.new(
-                secret_key,
+                settings.PII_HMAC_SECRET.get_secret_value().encode(),
                 m.group(0).encode(),
                 hashlib.sha256).hexdigest(), value)
             event_dict[key] = msg
