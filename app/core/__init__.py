@@ -1,5 +1,5 @@
 """Core application utilities: settings singleton and (future) logging.
-The `settings` singleton is imported from here to avoid circular imports. 
+The `settings` singleton is imported from here to avoid circular imports.
 The `get_logger` function is also imported from here to avoid circular imports.
 
 """

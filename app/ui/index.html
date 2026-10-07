@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Triage Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&family=Commissioner:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #f3eee3; --paper-2: #ebe4d4; --card: #fbf8f1; --ink: #1d1b17; --ink-2: #5b5548;
+  --rule: #d6cdb8; --red: #b8321f; --green: #2d6a3e; --blue: #24497a; --amber: #a86b12;
+  --shadow: 0 1px 0 rgba(29,27,23,.06), 0 10px 30px -18px rgba(29,27,23,.35);
+  --display: "Fraunces", Georgia, serif; --body: "Commissioner", "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15140f; --paper-2: #1c1a14; --card: #211f18; --ink: #ece5d4; --ink-2: #a39a86;
+    --rule: #37322a; --red: #e0644d; --green: #6fbf83; --blue: #7ea6e0; --amber: #e0a64a;
+    --shadow: 0 1px 0 rgba(0,0,0,.4), 0 14px 34px -20px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15140f; --paper-2: #1c1a14; --card: #211f18; --ink: #ece5d4; --ink-2: #a39a86;
+  --rule: #37322a; --red: #e0644d; --green: #6fbf83; --blue: #7ea6e0; --amber: #e0a64a;
+  --shadow: 0 1px 0 rgba(0,0,0,.4), 0 14px 34px -20px rgba(0,0,0,.9);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body);
+  background-image: repeating-linear-gradient(0deg, transparent 0 27px, color-mix(in srgb, var(--rule) 35%, transparent) 27px 28px);
+  min-height: 100vh;
+}
+header {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 22px 28px 14px; border-bottom: 3px double var(--rule);
+}
+.brand h1 { font: 800 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -.02em; margin: 0; }
+.brand h1 em { font-style: normal; color: var(--red); }
+.brand p { margin: 6px 0 0; color: var(--ink-2); font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.thread { font: 12px var(--mono); color: var(--ink-2); padding: 6px 10px; border: 1px dashed var(--rule); border-radius: 4px; }
+button { font: 600 13px var(--body); cursor: pointer; border-radius: 4px; transition: transform .12s, background .2s, opacity .2s; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); padding: 7px 12px; }
+.ghost:hover:not(:disabled) { background: var(--paper-2); }
+
+main {
+  display: grid; gap: 22px; padding: 22px 28px 40px;
+  grid-template-columns: minmax(280px, 1fr) minmax(340px, 1.25fr) minmax(280px, 1fr);
+}
+@media (max-width: 1100px) { main { grid-template-columns: 1fr 1fr; } .ledger { grid-column: 1 / -1; } }
+@media (max-width: 720px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 16px; } }
+section { min-width: 0; }
+.label {
+  font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2);
+  display: flex; align-items: center; gap: 8px; margin: 0 0 10px;
+}
+.label::after { content: ""; flex: 1; border-top: 1px solid var(--rule); }
+.panel { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; box-shadow: var(--shadow); }
+
+/* Desk: conversation */
+.convo { height: 52vh; min-height: 300px; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.bubble { max-width: 88%; padding: 9px 13px; border-radius: 10px; white-space: pre-wrap; animation: rise .35s ease both; }
+.bubble.user { align-self: flex-end; background: var(--ink); color: var(--paper); border-bottom-right-radius: 2px; }
+.bubble.agent { align-self: flex-start; background: var(--paper-2); border-bottom-left-radius: 2px; }
+.empty { color: var(--ink-2); font-style: italic; margin: auto; text-align: center; font-family: var(--display); }
+form.compose { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--rule); }
+input[type=text], textarea {
+  width: 100%; font: 15px var(--body); color: var(--ink); background: var(--paper);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 9px 11px;
+}
+input[type=text]:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.primary { background: var(--ink); color: var(--paper); border: 0; padding: 0 16px; }
+.primary:hover:not(:disabled) { transform: translateY(-1px); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 12px 12px; }
+.chip { font: 12px var(--mono); background: transparent; border: 1px dashed var(--rule); color: var(--ink-2); padding: 4px 8px; }
+
+/* Docket: HITL decision */
+.docket { position: relative; padding: 22px 22px 20px; overflow: hidden; }
+.docket::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 7px;
+  background: repeating-linear-gradient(-45deg, var(--red) 0 12px, transparent 12px 20px, var(--blue) 20px 32px, transparent 32px 40px);
+  opacity: .8;
+}
+.docket h2 { font: 600 24px/1.15 var(--display); margin: 6px 0 4px; }
+.docket .meta { font: 12px var(--mono); color: var(--ink-2); margin-bottom: 14px; }
+.idle { text-align: center; padding: 60px 20px; }
+.idle .seal {
+  width: 110px; height: 110px; margin: 0 auto 16px; border-radius: 50%; border: 3px solid var(--rule);
+  display: grid; place-items: center; font: 800 14px var(--display); color: var(--ink-2); letter-spacing: .1em;
+  transform: rotate(-8deg);
+}
+.status-running .seal { border-color: var(--amber); color: var(--amber); animation: spin 6s linear infinite; }
+.letter { border: 1px solid var(--rule); border-radius: 4px; padding: 12px 14px; background: var(--paper); margin-bottom: 12px; }
+.letter .hdr { font: 12px var(--mono); color: var(--ink-2); margin-bottom: 6px; }
+.letter .subj { font: 600 16px var(--display); margin-bottom: 6px; }
+.letter .body { white-space: pre-wrap; max-height: 180px; overflow-y: auto; font-size: 14px; }
+.letter.draft { border-left: 4px solid var(--blue); background: var(--card); }
+.stamps { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.stamp {
+  flex: 1; min-width: 110px; padding: 11px 10px; background: transparent; border: 2.5px solid currentColor;
+  font: 800 15px var(--display); letter-spacing: .12em; text-transform: uppercase; border-radius: 3px;
+}
+.stamp:hover:not(:disabled) { transform: rotate(-2deg) scale(1.03); background: color-mix(in srgb, currentColor 10%, transparent); }
+.stamp.go { color: var(--green); } .stamp.edit { color: var(--blue); } .stamp.no { color: var(--red); }
+.field { margin-top: 10px; } .field label { display: block; font: 500 12px var(--mono); color: var(--ink-2); margin-bottom: 4px; }
+textarea { min-height: 150px; resize: vertical; font-size: 14px; }
+.inked { position: absolute; right: 24px; top: 30px; font: 800 30px var(--display); letter-spacing: .1em; padding: 4px 12px;
+  border: 4px solid currentColor; border-radius: 6px; transform: rotate(-12deg); opacity: 0; pointer-events: none; }
+.inked.show { animation: stamp .5s cubic-bezier(.2,1.6,.4,1) forwards; }
+
+/* Ledger */
+.ledger .panel { padding: 12px 14px; margin-bottom: 18px; }
+.log { font: 12px/1.6 var(--mono); max-height: 26vh; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.log li { animation: rise .25s ease both; display: flex; gap: 8px; }
+.log .t { color: var(--ink-2); } .log .k-flagged { color: var(--red); } .log .k-sent { color: var(--green); }
+.log .k-interrupt { color: var(--amber); } .log .k-error { color: var(--red); font-weight: 600; }
+.entry { padding: 8px 0; border-bottom: 1px dotted var(--rule); font-size: 13px; }
+.entry:last-child { border-bottom: 0; }
+.entry b { font-family: var(--display); font-weight: 600; }
+.tag { font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .1em; padding: 1px 6px; border-radius: 3px; margin-right: 6px; border: 1px solid currentColor; }
+.tag.injection, .tag.empty { color: var(--red); } .tag.ambiguous { color: var(--amber); } .tag.sent { color: var(--green); }
+.entry .why { color: var(--ink-2); margin-top: 3px; }
+.counts { display: flex; gap: 18px; font: 12px var(--mono); color: var(--ink-2); margin: 0 0 12px; }
+.counts strong { font: 800 22px var(--display); color: var(--ink); display: block; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes spin { to { transform: rotate(352deg); } }
+@keyframes stamp { 0% { opacity: 0; transform: rotate(-12deg) scale(2.2); } 100% { opacity: .9; transform: rotate(-12deg) scale(1); } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Triage <em>Desk</em></h1>
+    <p>Email triage agent · human-in-the-loop</p>
+  </div>
+  <div class="controls">
+    <span class="thread" id="threadLabel">no thread</span>
+    <button class="ghost" id="newThread">New thread</button>
+    <button class="ghost" id="themeBtn" aria-label="Toggle theme">◐</button>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h3 class="label">Desk</h3>
+    <div class="panel">
+      <div class="convo" id="convo"><p class="empty">Ask the agent to triage your inbox.</p></div>
+      <div class="chips">
+        <button class="chip" data-say="Triage my inbox">triage my inbox</button>
+        <button class="chip" data-say="What can you do?">what can you do?</button>
+      </div>
+      <form class="compose" id="compose">
+        <input type="text" id="msg" placeholder="Message the agent…" autocomplete="off" maxlength="2000">
+        <button class="primary" id="sendBtn" type="submit">Send</button>
+      </form>
+    </div>
+  </section>
+
+  <section>
+    <h3 class="label">Decision</h3>
+    <div class="panel docket" id="docket"></div>
+  </section>
+
+  <section class="ledger">
+    <h3 class="label">Ledger</h3>
+    <div class="counts">
+      <div><strong id="cSent">0</strong>sent</div>
+      <div><strong id="cFlag">0</strong>flagged</div>
+      <div><strong id="cLeft">0</strong>queued</div>
+    </div>
+    <div class="panel"><ul class="log" id="log"></ul></div>
+    <h3 class="label">Flagged</h3>
+    <div class="panel" id="flagged"><p class="entry why">Nothing flagged yet.</p></div>
+    <h3 class="label">Sent</h3>
+    <div class="panel" id="sent"><p class="entry why">No replies sent yet.</p></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let threadId = store.get("triage.thread");
+let busy = false;
+const sentLog = [];
+
+// ── theme ──
+const savedTheme = store.get("triage.theme");
+if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+$("themeBtn").onclick = () => {
+  const dark = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim() === "#15140f";
+  const next = dark ? "light" : "dark";
+  document.documentElement.dataset.theme = next; store.set("triage.theme", next);
+};
+
+// ── HTTP + SSE over POST ──
+function headers() {
+  const h = { "Content-Type": "application/json" };
+  const key = store.get("triage.apikey"); if (key) h["X-API-Key"] = key;
+  return h;
+}
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: headers() });
+  if (res.status === 401) {
+    const key = prompt("This server requires an API key:");
+    if (key) { store.set("triage.apikey", key); return api(path, opts); }
+  }
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res;
+}
+async function stream(path, body) {
+  const res = await api(path, { method: "POST", body: JSON.stringify(body) });
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split(/\r?\n\r?\n/); buf = parts.pop();
+    for (const part of parts) {
+      let event = "message", data = "";
+      for (const line of part.split(/\r?\n/)) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (data) handle(event, JSON.parse(data));
+    }
+  }
+}
+
+// ── rendering ──
+function log(kind, text) {
+  const li = document.createElement("li");
+  const t = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  li.innerHTML = `<span class="t">${t}</span><span class="k-${kind}">${esc(text)}</span>`;
+  $("log").append(li); $("log").scrollTop = $("log").scrollHeight;
+}
+function bubble(role, text) {
+  const c = $("convo"); c.querySelector(".empty")?.remove();
+  const d = document.createElement("div"); d.className = `bubble ${role}`; d.textContent = text;
+  c.append(d); c.scrollTop = c.scrollHeight;
+}
+function setBusy(b) {
+  busy = b; $("sendBtn").disabled = b; $("msg").disabled = b;
+  document.querySelectorAll(".docket button").forEach((x) => (x.disabled = b));
+  if (b && !$("docket").querySelector(".stamps")) idle("SORTING", "The agent is working…", true);
+}
+function idle(seal, text, running = false) {
+  const d = $("docket"); d.className = `panel docket ${running ? "status-running" : ""}`;
+  d.innerHTML = `<div class="idle"><div class="seal">${seal}</div><p class="empty">${esc(text)}</p></div>`;
+}
+function letter(e, cls = "", label = "") {
+  return `<div class="letter ${cls}"><div class="hdr">${label}${esc(e.sender || e.recipient || "")}</div>
+    <div class="subj">${esc(e.subject)}</div><div class="body">${esc(e.body)}</div></div>`;
+}
+function inkStamp(word, color) {
+  const s = $("docket").querySelector(".inked"); if (!s) return;
+  s.textContent = word; s.style.color = color; s.classList.add("show");
+}
+function renderInterrupt(v) {
+  const d = $("docket"); d.className = "panel docket";
+  let html = `<div class="inked"></div><div class="meta">ACTION REQUIRED · ${esc(v.kind || "input")}</div><h2>${esc(v.question)}</h2>`;
+  if (v.kind === "auth") {
+    html += `<p class="why">The agent wants to read your inbox. Nothing is fetched until you approve.</p>
+      <div class="stamps"><button class="stamp go" data-r='{"decision":"approve"}'>Grant</button>
+      <button class="stamp no" data-r='{"decision":"deny"}'>Deny</button></div>`;
+  } else if (v.kind === "approval") {
+    html += letter(v.email, "", "FROM ") + letter(v.draft, "draft", "REPLY TO ") +
+      `<div class="stamps"><button class="stamp go" data-r='{"decision":"approve"}'>Approve</button>
+      <button class="stamp edit" data-r='{"decision":"edit"}'>Edit</button>
+      <button class="stamp no" data-r='{"decision":"reject"}'>Reject</button></div>`;
+  } else if (v.kind === "edit") {
+    html += `<div class="field"><label for="eSub">Subject</label><input type="text" id="eSub" value="${esc(v.draft.subject)}"></div>
+      <div class="field"><label for="eBody">Body</label><textarea id="eBody">${esc(v.draft.body)}</textarea></div>
+      <div class="stamps"><button class="stamp edit" id="submitEdit">Submit edit</button></div>`;
+  } else if (v.kind === "reject_reason") {
+    html += letter(v.draft, "draft", "REJECTED DRAFT · ") +
+      `<div class="field"><label for="rReason">What should change?</label><textarea id="rReason" style="min-height:90px" placeholder="e.g. too formal, mention the Friday deadline"></textarea></div>
+      <div class="stamps"><button class="stamp no" id="submitReason">Send back for redraft</button></div>`;
+  } else {
+    html += `<pre>${esc(JSON.stringify(v, null, 2))}</pre>`;
+  }
+  d.innerHTML = html;
+  d.querySelectorAll("[data-r]").forEach((b) => (b.onclick = () => {
+    const r = JSON.parse(b.dataset.r);
+    const color = getComputedStyle(b).color;
+    inkStamp(b.textContent.trim(), color);
+    setTimeout(() => resume(r), 380);
+  }));
+  $("submitEdit")?.addEventListener("click", () => resume({ subject: $("eSub").value, body: $("eBody").value }));
+  $("submitReason")?.addEventListener("click", () => resume({ reason: $("rReason").value || "No reason given." }));
+}
+function renderSnapshot(s) {
+  $("cSent").textContent = sentLog.length || (s.processed_ids.length - s.flagged.length);
+  $("cFlag").textContent = s.flagged.length; $("cLeft").textContent = s.inbox_remaining;
+  $("flagged").innerHTML = s.flagged.length ? s.flagged.map((f) =>
+    `<div class="entry"><span class="tag ${esc(f.category)}">${esc(f.category)}</span><b>${esc(f.subject)}</b>
+     <div class="why">${esc(f.sender)} — ${esc(f.reason)}</div></div>`).join("") : `<p class="entry why">Nothing flagged yet.</p>`;
+}
+function renderSent() {
+  $("sent").innerHTML = sentLog.length ? sentLog.map((m) =>
+    `<div class="entry"><span class="tag sent">sent</span><b>${esc(m)}</b></div>`).join("") : `<p class="entry why">No replies sent yet.</p>`;
+  $("cSent").textContent = sentLog.length;
+}
+
+// ── SSE event handling ──
+function handle(event, data) {
+  if (event === "node") log("node", `→ ${data.node}`);
+  else if (event === "message") { bubble("agent", data.content); log("node", "agent replied"); }
+  else if (event === "flagged") { log("flagged", `⚑ [${data.category}] ${data.subject}`); refresh(); }
+  else if (event === "sent") { sentLog.push(data.message_id); renderSent(); log("sent", `✉ reply sent · ${data.message_id}`); }
+  else if (event === "interrupt") { log("interrupt", `paused: ${data.kind}`); renderInterrupt(data); refresh(); }
+  else if (event === "done") { log("node", "■ run finished"); renderSnapshot(data); idle("DONE", "Run finished. Send another message to continue."); }
+  else if (event === "error") { log("error", data.detail); idle("ERROR", data.detail); }
+}
+
+async function refresh() {
+  if (!threadId) return;
+  try { renderSnapshot(await (await api(`/api/threads/${threadId}`)).json()); } catch { /* best effort */ }
+}
+async function ensureThread() {
+  if (threadId) return threadId;
+  threadId = (await (await api("/api/threads", { method: "POST" })).json()).thread_id;
+  store.set("triage.thread", threadId); $("threadLabel").textContent = `thread ${threadId.slice(0, 8)}`;
+  return threadId;
+}
+async function run(fn) {
+  if (busy) return; setBusy(true);
+  try { await fn(); } catch (e) { log("error", e.message); idle("ERROR", e.message); }
+  finally { setBusy(false); }
+}
+function send(text) {
+  run(async () => { await ensureThread(); bubble("user", text); log("node", `you: ${text}`);
+    await stream(`/api/threads/${threadId}/messages`, { text }); });
+}
+function resume(value) {
+  run(() => stream(`/api/threads/${threadId}/resume`, { resume: value }));
+}
+
+$("compose").onsubmit = (e) => { e.preventDefault(); const t = $("msg").value.trim(); if (t) { $("msg").value = ""; send(t); } };
+document.querySelectorAll("[data-say]").forEach((b) => (b.onclick = () => send(b.dataset.say)));
+$("newThread").onclick = () => {
+  if (busy) return; threadId = null; store.set("triage.thread", ""); sentLog.length = 0;
+  $("threadLabel").textContent = "no thread"; $("convo").innerHTML = `<p class="empty">Ask the agent to triage your inbox.</p>`;
+  $("log").innerHTML = ""; renderSent(); renderSnapshot({ processed_ids: [], flagged: [], inbox_remaining: 0 }); idle("READY", "No pending decision.");
+};
+
+// ── boot: restore a thread (and any pending decision) after reload ──
+(async () => {
+  idle("READY", "No pending decision.");
+  if (!threadId) return;
+  $("threadLabel").textContent = `thread ${threadId.slice(0, 8)}`;
+  try {
+    const s = await (await api(`/api/threads/${threadId}`)).json();
+    s.conversation.forEach((m) => bubble(m.role, m.content));
+    renderSnapshot(s);
+    if (s.pending_interrupt) renderInterrupt(s.pending_interrupt);
+  } catch (e) { log("error", e.message); }
+})();
+</script>
+</body>
+</html>

@@ -14,6 +14,6 @@ TOOL_PERMISSIONS = {
     "reading": [fetch_inbox],
     "drafting": [],
     "awaiting_approval": [],
-    "sending": [], 
-    "done": [],  
+    "sending": [],
+    "done": [],
 }

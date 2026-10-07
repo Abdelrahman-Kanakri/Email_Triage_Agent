@@ -10,13 +10,14 @@ recipient has to come from state, not the model, per the injection
 threat model. Skip it for tools that are pure functions of their
 model-given arguments alone.
 """
+
 import re
 from datetime import datetime
 from pathlib import Path
 
 from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import ToolMessage
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from app.core import get_logger, settings
@@ -24,122 +25,143 @@ from app.graph.state import Email, State
 
 logger = get_logger(__name__)
 
-# Define the data path for the fetch_mails
+# Paths are module attributes (not read inside the functions) so tests can
+# monkeypatch them to a tmp_path.
 EMAILS_DATA_PATH = Path(settings.EMAILS_DATA_PATH)
+OUTBOX_PATH = Path(settings.OUTBOX_PATH)
 
-@tool("auth_tool_access", description = "Tool to check if the user is authenticated to access the email triage agent.")
+
+@tool("auth_tool_access", description="Ask the human to grant inbox access.")
 def auth_tool_access(runtime: ToolRuntime) -> Command:
-    """Grants access after human approval.
+    """Pause for human approval; write `authenticated` either way.
 
-    No input parameters: this tool is gated entirely by
-    HumanInTheLoopMiddleware's interrupt_on config, which pauses BEFORE
-    this function ever runs and only lets it through on human approval.
-    There's nothing for the model to decide or supply here.
+    The `interrupt()` lives inside the tool because `HumanInTheLoopMiddleware`
+    only attaches to `create_agent`, not a raw `StateGraph`. A denial still
+    returns a ToolMessage -- every tool call needs a reply linked by
+    `tool_call_id`, or the message history breaks.
 
-    Returns a Command instead of a plain value because `State` is a
-    TypedDict, not a Pydantic model — a normal return doesn't mutate
-    state on its own. Command(update={...}) is the mechanism for a tool
-    to write directly into graph state.
-
-    The `messages` key with a ToolMessage(tool_call_id=...) is required,
-    not optional: it links this response back to the specific tool call
-    the model made. Without a matching tool_call_id, the model's message
-    history has a tool call with no reply, and the conversation breaks.
-
-    Tool name note: interrupt_on matches by this tool's registered name
-    — "auth_tool_access" (set explicitly above), not the function name
-    `auth_tool`. Keep interrupt_on's key in sync with that string.
+    Resume contract: `Command(resume={"decision": "approve" | "deny"})`.
     """
-    logger.info("User authentication approved via human-in-the-loop.")
+    decision = interrupt(
+        {
+            "kind": "auth",
+            "question": "Allow the agent to access your inbox?",
+            "options": ["approve", "deny"],
+        }
+    )
+    approved = isinstance(decision, dict) and decision.get("decision") == "approve"
+    if approved:
+        logger.info("inbox access granted by human")
+        return Command(
+            update={
+                "authenticated": True,
+                "messages": [
+                    ToolMessage(content="Access granted.", tool_call_id=runtime.tool_call_id)
+                ],
+            }
+        )
+    logger.info("inbox access denied by human")
     return Command(
         update={
-            "authenticated": True,
-            "messages": [ToolMessage(content = "User authentication status updated.", tool_call_id = runtime.tool_call_id)]
+            "authenticated": False,
+            "messages": [
+                ToolMessage(
+                    content="Access DENIED by the user. Do not call this tool again. "
+                    "Tell the user the mail was not fetched and ask what else they need.",
+                    tool_call_id=runtime.tool_call_id,
+                )
+            ],
         }
     )
 
 
-@tool("fetch_inbox", description = "Tool to fetch the user's inbox emails.")
-def fetch_inbox(runtime: ToolRuntime) -> Command: 
+def parse_email_file(path: Path) -> Email | None:
+    """Parse one markdown email file; `None` if a required header is missing.
+
+    Pure function (no tool, no state) so the parsing is unit-testable on
+    its own. Body = everything after the `**Date:**` line.
     """
-    Fetches the user's inbox emails and updates the state.
+    text = path.read_text(encoding="utf-8")
+
+    def header(name: str) -> str | None:
+        match = re.search(rf"\*\*{name}:\*\*\s*(.+)", text)
+        return match.group(1).strip() if match else None
+
+    match_body = re.search(r"\*\*Date:\*\*.*?\n(.*)", text, flags=re.DOTALL)
+    try:
+        return Email(
+            message_id=path.stem,
+            sender=header("From"),
+            subject=header("Subject"),
+            body=match_body.group(1).strip() if match_body else None,
+            date=header("Date"),
+            to=header("To"),
+        )
+    except ValidationError as exc:
+        logger.warning("skipping invalid email file", file=path.name, errors=exc.error_count())
+        return None
+
+
+@tool("fetch_inbox", description="Fetch the user's unprocessed inbox emails.")
+def fetch_inbox(runtime: ToolRuntime) -> Command:
+    """Load every `*.md` email not yet processed in this thread into `inbox`.
+
+    Sorted by filename so runs are deterministic (glob order isn't).
+    Emails whose id is in `processed_ids` (already sent or flagged on
+    this thread) are skipped.
     """
-    email_list = []
-    for path in EMAILS_DATA_PATH.glob("*.md"):
-        # Fetch the content of the each email file
-        text = path.read_text(encoding = "utf-8")
-        
-        # Regex pattern to extract the email subject, from the email
-        #  ── Extract `Subject` ─────────────────────────────────────────────────────────────
-        match_subject = re.search(r"\*\*Subject:\*\*\s*(.+)", text)
-        subject = match_subject.group(1) if match_subject else None
-        #  ──  Extract `Sender` ─────────────────────────────────────────────────────────────
-        match_sender = re.search(r"\*\*From:\*\*\s*(.+)", text)
-        sender = match_sender.group(1) if match_sender else None
-        #  ──  Extract `Date` ─────────────────────────────────────────────────────────────
-        match_date = re.search(r"\*\*Date:\*\*\s*(.+)", text)
-        date = match_date.group(1) if match_date else None
-        #  ──  Extract `To` ─────────────────────────────────────────────────────────────
-        match_to = re.search(r"\*\*To:\*\*\s*(.+)", text)
-        to = match_to.group(1) if match_to else None            
-        #  ──  Extract `Body` after the date ─────────────────────────────────────────────────────────────
-        match_body = re.search(r"\*\*Date:\*\*.*?\n(.*)", text, flags=re.DOTALL)
-        body = match_body.group(1).strip() if match_body else None
-        
-        try: 
-            email = Email(
-                message_id = path.stem,
-                sender = sender,
-                subject = subject,
-                body = body,
-                date = date, 
-                to = to
-            )
-            email_list.append(email)
-        except ValidationError as exc: 
-            logger.warning(f"Skipping invalid email file {path}: {exc}")
-            continue
+    processed = set(runtime.state.get("processed_ids") or [])
+    emails = [
+        email
+        for path in sorted(EMAILS_DATA_PATH.glob("*.md"))
+        if (email := parse_email_file(path)) is not None and email.message_id not in processed
+    ]
+    logger.info("inbox fetched", count=len(emails), skipped=len(processed))
     return Command(
-        update = {
-            "inbox": email_list,
-            "messages": [ToolMessage(content = "Inbox emails fetched and state updated.", tool_call_id = runtime.tool_call_id)]
+        update={
+            "inbox": emails,
+            "messages": [
+                ToolMessage(
+                    content=f"Fetched {len(emails)} unprocessed email(s).",
+                    tool_call_id=runtime.tool_call_id,
+                )
+            ],
         }
     )
+
 
 def send_email(state: State) -> dict:
-    """Sends the approved/edited draft as a reply to `current_email`.
+    """Send the approved/edited draft as a reply to `current_email`.
 
-    Not a `@tool` -- deliberately. `registry.py`'s `TOOL_PERMISSIONS` never
-    lists `send_email` for any of the six FSM states, so no model ever
-    decides to call it; it's only ever invoked directly by the `sending`
-    node. Without a model-issued tool call there's no `tool_call_id` to
-    link a `ToolMessage`/`Command` back to, so this takes plain `state`
-    and returns a plain dict, the same shape as `guard`/`drafting`/
-    `awaiting_approval` -- not `runtime: ToolRuntime` and `Command`, which
-    only apply to tools a model actually invokes (`auth_tool_access`,
-    `fetch_inbox`, both bound above).
+    Not a `@tool`: no FSM state's `TOOL_PERMISSIONS` lists it, so no model
+    can ever decide to call it -- only the `sending` node does, after an
+    explicit human approval.
 
-    Sender/recipient are read from `current_email`, never from `Draft` --
-    same anti-injection design as everywhere else in this project:
-    `current_email.to` (the address the original mail was addressed to,
-    i.e. this agent's own address) becomes the outgoing sender;
-    `current_email.sender` (who originally wrote in) becomes the outgoing
-    recipient. A model-authored `Draft.recipient` is never trusted for
-    where the email actually goes.
+    Sender/recipient come from `current_email`, never from `Draft` --
+    anti-injection: a model-authored `Draft.recipient` is never trusted for
+    where mail goes. `current_email.to` (this agent's address) becomes the
+    outgoing sender; `current_email.sender` becomes the recipient.
 
-    No inbox/email-sending side effect actually wired up yet -- currently
-    logs the send. Returns `{}`: nothing about this action needs to be
-    written back into graph state.
+    "Sending" = writing the reply to `OUTBOX_PATH` as markdown (a stand-in
+    for an SMTP/Gmail call), so the result is inspectable. Returns `{}`.
     """
-    subject = state["draft"].subject if state["draft"] else None
-    sender = state["current_email"].to if state["current_email"] else None
-    # for the reciepient, it does not matter from where to get it, 
-    # either from the draft or the current email,
-    # as the recipient is the sender of the current email.
-    recipient = state["current_email"].sender if state["current_email"] else None
+    email = state["current_email"]
+    draft = state["draft"]
+    if email is None or draft is None:
+        logger.warning("send skipped: no current email or draft")
+        return {}
+
+    sender, recipient = email.to, email.sender
     date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # noqa: DTZ005
-    body = state["draft"].body if state["draft"] else None
-    
-    logger.info(f"Sending email from {sender} to {recipient} on {date} with the body: {body} and subject: {subject}.")
-    
+    logger.info(
+        f"Sending email from {sender} to {recipient} on {date} "
+        f"with the body: {draft.body} and subject: {draft.subject}."
+    )
+
+    OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
+    (OUTBOX_PATH / f"reply-{email.message_id}.md").write_text(
+        f"**Subject:** {draft.subject}\n**From:** {sender}\n**To:** {recipient}\n"
+        f"**Date:** {date}\n**In-Reply-To:** {email.message_id}\n\n{draft.body}\n",
+        encoding="utf-8",
+    )
     return {}

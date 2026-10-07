@@ -13,3 +13,7 @@ build/
 graphify-out
 
 logs
+data/outbox/
+data/state/
+data/*.sqlite*
+app/logs/

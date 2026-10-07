@@ -12,6 +12,7 @@ a tool-less classifier LLM call that is the real authority on
 Never exposed as a tool (`.bind_tools()`) -- least privilege applied
 recursively, so even a successful injection here has nothing to call.
 """
+
 import re
 
 from langchain_openai import ChatOpenAI
@@ -25,7 +26,9 @@ from app.graph.state import ClassifierResult, Email
 # a function to create a Logger for this module
 def create_logger() -> FilteringBoundLogger:
     from app.core import get_logger
+
     return get_logger(__name__)
+
 
 # Define the LLM for injection detection with the SchemaModel output parser
 model = ChatOpenAI(
@@ -36,31 +39,35 @@ model = ChatOpenAI(
 # wrap the model with structured output to ensure it returns a ClassifierResult
 model_with_structured_output = model.with_structured_output(ClassifierResult)
 
+
 def get_injection_type(email: Email) -> str:
     """
     A function that returns the injection type based on the input email.
-    
+
     returns:
-        - "clean" if the input email is "clean" 
+        - "clean" if the input email is "clean"
         - "injection" if the input email is "injection"
-        - "ambiguous" if the input email is "ambiguous"    
+        - "ambiguous" if the input email is "ambiguous"
     """
     logger = create_logger()
     # Check if the inbox is empty and raise an error if it is
     if not email.body:
+        logger.warning("Empty body, can't classify", message_id=email.message_id)
         raise ValueError("Email is empty. Cannot determine injection type.")
-    
+
     # A regex pattern to check if the email body contains any injection keywords
-    injection_keywords = r"(?i)(" \
-    r"DROP\s+TABLE|UNION\s+SELECT|--|;|" \
-    r"<script\b|javascript:|onerror\s*=|" \
-    r"ignore\s+(all\s+)?(previous|prior)\s+(instructions|prompts)|" \
-    r"disregard\s+(all\s+)?system\s+instructions|" \
-    r"you\s+are\s+now\s+in\s+DAN\s+mode|" \
-    r"act\s+as\s+an\s+unrestricted|" \
-    r"\[SYSTEM\]|\[/INST\]|<\|im_start\|>" \
-    r")"
-    
+    injection_keywords = (
+        r"(?i)("
+        r"DROP\s+TABLE|UNION\s+SELECT|"
+        r"<script\b|javascript:|onerror\s*=|"
+        r"ignore\s+(all\s+)?(previous|prior)\s+(instructions|prompts)|"
+        r"disregard\s+(all\s+)?system\s+instructions|"
+        r"you\s+are\s+now\s+in\s+DAN\s+mode|"
+        r"act\s+as\s+an\s+unrestricted|"
+        r"\[SYSTEM\]|\[/INST\]|<\|im_start\|>"
+        r")"
+    )
+
     email_body = email.body
     # Two-tier guard, not a single check. A regex match is trusted immediately
     # (cheap, instant, and a deterministic pattern can't be talked out of a
@@ -70,6 +77,12 @@ def get_injection_type(email: Email) -> str:
     # heuristic is ever allowed to decide on its own is "injection"; every
     # other case escalates to the LLM, which is the actual authority here.
     if re.search(injection_keywords, email_body):
+        logger.info(
+            "regex caught it",
+            message_id=email.message_id,
+            tier="regex",
+            verdict="injection",
+        )
         return "injection"
     else:
         # with_structured_output forces the reply into a validated
@@ -81,6 +94,12 @@ def get_injection_type(email: Email) -> str:
         # instead return an AIMessage, requiring .content to reach raw text --
         # here injection_result is the ClassifierResult itself, read directly.
         injection_result = model_with_structured_output.invoke(
-        INJECTION_DETECTION_PROMPT.format(email_body = email_body)
+            INJECTION_DETECTION_PROMPT.format(email_body=email_body)
+        )
+        logger.info(
+            "LLM Decide",
+            message_id=email.message_id,
+            tier="LLM",
+            verdict=injection_result.injection_type,
         )
         return injection_result.injection_type

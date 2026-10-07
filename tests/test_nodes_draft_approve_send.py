@@ -5,6 +5,7 @@ a fake, and `interrupt` is patched for unit tests. One real-graph test
 (MemorySaver + `Command(resume=...)`) covers the multi-interrupt resume
 order, which patching can't prove.
 """
+
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -64,6 +65,7 @@ def make_state(email: Email, draft: Draft | None = None, rejections=None) -> Sta
         "flagged_emails": [],
         "rejection_reasons": rejections or [],
         "messages": [],
+        "processed_ids": [],
     }
 
 
@@ -148,49 +150,74 @@ def scripted_interrupt(monkeypatch):
     return install
 
 
-def test_approve_returns_empty_update(email, draft, scripted_interrupt):
+def test_approve_routes_to_sending_without_update(email, draft, scripted_interrupt):
     seen = scripted_interrupt({"decision": "approve"})
-    assert nodes.awaiting_approval(make_state(email, draft)) == {}
+    cmd = nodes.awaiting_approval(make_state(email, draft))
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "sending"
+    assert not cmd.update
     assert len(seen) == 1
+    assert seen[0]["kind"] == "approval"
     assert seen[0]["options"] == ["approve", "edit", "reject"]
+    assert seen[0]["draft"]["subject"] == draft.subject
 
 
-def test_edit_replaces_draft_and_pins_recipient(email, draft, scripted_interrupt):
+def test_edit_replaces_draft_pins_recipient_and_loops_back(email, draft, scripted_interrupt):
     seen = scripted_interrupt(
         {"decision": "edit"},
         {"subject": "Re: new subject", "body": "edited body"},
     )
-    result = nodes.awaiting_approval(make_state(email, draft))
-    assert set(result) == {"draft"}
-    assert result["draft"].subject == "Re: new subject"
-    assert result["draft"].body == "edited body"
-    assert result["draft"].recipient == "alice@example.com"
-    assert len(seen) == 2
-    assert seen[1]["options"] == ["submit"]
+    cmd = nodes.awaiting_approval(make_state(email, draft))
+    assert cmd.goto == "awaiting_approval"
+    assert set(cmd.update) == {"draft"}
+    new = cmd.update["draft"]
+    assert (new.subject, new.body, new.recipient) == (
+        "Re: new subject",
+        "edited body",
+        "alice@example.com",
+    )
+    assert [v["kind"] for v in seen] == ["approval", "edit"]
 
 
-def test_reject_records_reason_against_message_id(email, draft, scripted_interrupt):
+def test_edit_with_blank_fields_keeps_original_text(email, draft, scripted_interrupt):
+    scripted_interrupt({"decision": "edit"}, {"subject": "", "body": ""})
+    new = nodes.awaiting_approval(make_state(email, draft)).update["draft"]
+    assert (new.subject, new.body) == (draft.subject, draft.body)
+
+
+def test_reject_records_reason_and_routes_to_drafting(email, draft, scripted_interrupt):
     scripted_interrupt({"decision": "reject"}, {"reason": "too informal"})
-    result = nodes.awaiting_approval(make_state(email, draft))
-    assert set(result) == {"rejection_reasons"}
-    (record,) = result["rejection_reasons"]
-    assert record.message_id == "msg-1"
-    assert record.reason == "too informal"
+    cmd = nodes.awaiting_approval(make_state(email, draft))
+    assert cmd.goto == "drafting"
+    (record,) = cmd.update["rejection_reasons"]
+    assert (record.message_id, record.reason) == ("msg-1", "too informal")
 
 
-def test_unrecognized_decision_returns_empty_update(email, draft, scripted_interrupt):
+def test_unrecognized_decision_asks_again(email, draft, scripted_interrupt):
     seen = scripted_interrupt({"decision": "banana"})
-    assert nodes.awaiting_approval(make_state(email, draft)) == {}
+    cmd = nodes.awaiting_approval(make_state(email, draft))
+    assert cmd.goto == "awaiting_approval"
+    assert not cmd.update
     assert len(seen) == 1
+
+
+def test_non_dict_resume_is_treated_as_unrecognized(email, draft, scripted_interrupt):
+    scripted_interrupt("approve")  # caller forgot the {"decision": ...} wrapper
+    assert nodes.awaiting_approval(make_state(email, draft)).goto == "awaiting_approval"
 
 
 # ── awaiting_approval (real graph: multi-interrupt resume order) ─────────────
 @pytest.fixture
 def approval_graph():
+    """awaiting_approval plus stub targets, so each Command(goto=...) has
+    somewhere real to land."""
     builder = StateGraph(State)
     builder.add_node("awaiting_approval", nodes.awaiting_approval)
+    builder.add_node("sending", lambda state: {"draft": None})
+    builder.add_node("drafting", lambda state: {})
     builder.add_edge(START, "awaiting_approval")
-    builder.add_edge("awaiting_approval", END)
+    builder.add_edge("sending", END)
+    builder.add_edge("drafting", END)
     return builder.compile(checkpointer=MemorySaver())
 
 
@@ -198,24 +225,26 @@ def _cfg(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
 
 
-def test_graph_edit_takes_two_resumes_in_order(email, draft, approval_graph):
+def test_graph_edit_then_approve(email, draft, approval_graph):
     cfg = _cfg("edit")
     first = approval_graph.invoke(make_state(email, draft), cfg)
-    assert first["__interrupt__"][0].value["options"] == ["approve", "edit", "reject"]
+    assert first["__interrupt__"][0].value["kind"] == "approval"
 
     second = approval_graph.invoke(Command(resume={"decision": "edit"}), cfg)
-    assert second["__interrupt__"][0].value["options"] == ["submit"]
+    assert second["__interrupt__"][0].value["kind"] == "edit"
 
-    final = approval_graph.invoke(
-        Command(resume={"subject": "S", "body": "B"}), cfg
-    )
+    # Edit loops back: the human now approves the EDITED draft.
+    third = approval_graph.invoke(Command(resume={"subject": "S", "body": "B"}), cfg)
+    pending = third["__interrupt__"][0].value
+    assert pending["kind"] == "approval"
+    assert (pending["draft"]["subject"], pending["draft"]["body"]) == ("S", "B")
+
+    final = approval_graph.invoke(Command(resume={"decision": "approve"}), cfg)
     assert "__interrupt__" not in final
-    assert final["draft"].subject == "S"
-    assert final["draft"].body == "B"
-    assert final["draft"].recipient == "alice@example.com"
+    assert final["draft"] is None  # reached the sending stub
 
 
-def test_graph_reject_takes_two_resumes_in_order(email, draft, approval_graph):
+def test_graph_reject_takes_two_resumes_then_reaches_drafting(email, draft, approval_graph):
     cfg = _cfg("reject")
     approval_graph.invoke(make_state(email, draft), cfg)
     approval_graph.invoke(Command(resume={"decision": "reject"}), cfg)
@@ -223,8 +252,8 @@ def test_graph_reject_takes_two_resumes_in_order(email, draft, approval_graph):
 
     assert "__interrupt__" not in final
     (record,) = final["rejection_reasons"]
-    assert record.message_id == "msg-1"
-    assert record.reason == "wrong tone"
+    assert (record.message_id, record.reason) == ("msg-1", "wrong tone")
+    assert final["draft"] == draft  # drafting stub ran, sending did not
 
 
 def test_graph_approve_finishes_after_one_resume(email, draft, approval_graph):
@@ -232,7 +261,7 @@ def test_graph_approve_finishes_after_one_resume(email, draft, approval_graph):
     approval_graph.invoke(make_state(email, draft), cfg)
     final = approval_graph.invoke(Command(resume={"decision": "approve"}), cfg)
     assert "__interrupt__" not in final
-    assert final["draft"] == draft
+    assert final["draft"] is None
     assert final["rejection_reasons"] == []
 
 
@@ -244,6 +273,9 @@ class RecordingLogger:
     def info(self, msg, *args, **kwargs) -> None:
         self.infos.append(msg)
 
+    def warning(self, msg, *args, **kwargs) -> None:
+        self.infos.append(msg)
+
 
 @pytest.fixture
 def send_log(monkeypatch) -> RecordingLogger:
@@ -252,8 +284,12 @@ def send_log(monkeypatch) -> RecordingLogger:
     return rec
 
 
-def test_sending_returns_empty_update(email, draft, send_log):
-    assert nodes.sending(make_state(email, draft)) == {}
+def test_sending_clears_working_fields_and_marks_processed(email, draft, send_log):
+    assert nodes.sending(make_state(email, draft)) == {
+        "current_email": None,
+        "draft": None,
+        "processed_ids": ["msg-1"],
+    }
 
 
 def test_sending_delegates_to_send_email(email, draft, monkeypatch):
@@ -264,14 +300,15 @@ def test_sending_delegates_to_send_email(email, draft, monkeypatch):
     assert calls == [state]
 
 
-def test_sending_routes_to_email_sender_not_draft_recipient(email, send_log):
-    tampered = Draft(
-        subject="Re: hi", body="hello", recipient="attacker@evil.com"
-    )
+def test_sending_routes_to_email_sender_not_draft_recipient(email, send_log, isolated_paths):
+    tampered = Draft(subject="Re: hi", body="hello", recipient="attacker@evil.com")
     nodes.sending(make_state(email, tampered))
     (line,) = send_log.infos
     assert "from agent@example.com to alice@example.com" in line
     assert "attacker@evil.com" not in line
+    written = (isolated_paths["outbox"] / "reply-msg-1.md").read_text(encoding="utf-8")
+    assert "**To:** alice@example.com" in written
+    assert "attacker@evil.com" not in written
 
 
 def test_sending_logs_draft_subject_and_body(email, draft, send_log):
@@ -279,3 +316,8 @@ def test_sending_logs_draft_subject_and_body(email, draft, send_log):
     (line,) = send_log.infos
     assert "Re: Meeting tomorrow?" in line
     assert "3pm works." in line
+
+
+def test_send_email_without_draft_is_a_noop(email, send_log, isolated_paths):
+    assert email_ops.send_email(make_state(email, draft=None)) == {}
+    assert not isolated_paths["outbox"].exists()

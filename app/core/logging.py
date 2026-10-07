@@ -1,12 +1,16 @@
 """Structured JSON logging configuration using structlog."""
 
 import logging
+import sys
 from pathlib import Path
 
 import structlog
 from structlog.types import FilteringBoundLogger
 
-from app.guardrails import redact_pii
+from app.core.config import settings
+from app.guardrails.pii import (
+    redact_pii,  # submodule, not package: avoids the guardrails<->core cycle
+)
 
 # ── Configuration ───────────────────────────────────────────────────────────
 LOG_DIR = Path("logs")
@@ -20,10 +24,16 @@ _root_handler = logging.FileHandler(LOG_DIR / "log.log")
 # then append the _json_formatter to the handler
 _root_handler.setFormatter(_json_formatter)
 
+# Containers: also stream JSON lines to stdout so `docker logs` sees them.
+_stdout_handler: logging.Handler | None = None
+if settings.LOG_TO_STDOUT:
+    _stdout_handler = logging.StreamHandler(sys.stdout)
+    _stdout_handler.setFormatter(_json_formatter)
+
 # Append the root handler to the logger
 logging.basicConfig(
     level=logging.INFO,
-    handlers=[_root_handler],
+    handlers=[h for h in (_root_handler, _stdout_handler) if h is not None],
 )
 
 structlog.configure(
@@ -72,6 +82,8 @@ def get_logger(name: str | None = None) -> FilteringBoundLogger:
             # Append the _json_formatter to the handler as previous
             handler.setFormatter(_json_formatter)
             stdlib_logger.addHandler(handler)
+            if _stdout_handler is not None:
+                stdlib_logger.addHandler(_stdout_handler)
             stdlib_logger.setLevel(logging.INFO)
             stdlib_logger.propagate = False  # Prevent double logging to root logger
 

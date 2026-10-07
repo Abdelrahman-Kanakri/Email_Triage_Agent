@@ -25,11 +25,12 @@ This pseudonymization only touches the *logged* copy. `send_email`
 keeps reading the real `Email.sender`/`Email.to` from `State`, never
 the hash -- the hash isn't reversible and would break sending.
 """
+
 import hashlib
 import hmac
 import re
 
-from app.core import settings
+from app.core.config import settings
 
 
 def redact_pii(logger, method_name: str, event_dict: dict):
@@ -41,9 +42,14 @@ def redact_pii(logger, method_name: str, event_dict: dict):
     pattern = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+"
     for key, value in event_dict.items():
         if isinstance(value, str):
-            msg = re.sub(pattern, lambda m: hmac.new(
-                settings.PII_HMAC_SECRET.get_secret_value().encode(),
-                m.group(0).encode(),
-                hashlib.sha256).hexdigest(), value)
+            msg = re.sub(
+                pattern,
+                lambda m: hmac.new(
+                    settings.PII_HMAC_SECRET.get_secret_value().encode(),
+                    m.group(0).encode(),
+                    hashlib.sha256,
+                ).hexdigest(),
+                value,
+            )
             event_dict[key] = msg
     return event_dict

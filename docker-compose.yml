@@ -1,0 +1,23 @@
+services:
+  triage:
+    build: .
+    image: email-triage-agent:latest
+    ports:
+      - "8000:8000"
+    # Secrets and model names come from .env (never baked into the image).
+    env_file: .env
+    # Container paths override whatever .env says for local runs.
+    environment:
+      EMAILS_DATA_PATH: /app/data/inbox
+      OUTBOX_PATH: /app/data/outbox
+      CHECKPOINT_DB: /app/data/state/checkpoints.sqlite
+      LOG_TO_STDOUT: "true"
+    volumes:
+      - ./data/inbox:/app/data/inbox:ro      # the mail to triage, read-only
+      - triage-outbox:/app/data/outbox       # sent replies
+      - triage-state:/app/data/state         # checkpoints: paused runs survive restarts
+    restart: unless-stopped
+
+volumes:
+  triage-outbox:
+  triage-state:

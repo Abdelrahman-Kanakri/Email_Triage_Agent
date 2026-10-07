@@ -3,6 +3,7 @@
 Import the module-level ``settings`` singleton — never instantiate ``Settings``
 directly elsewhere, as that would bypass the singleton and re-read the file.
 """
+
 import os
 
 from pydantic import SecretStr
@@ -25,31 +26,41 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
-        
     )
     # ── LangSmith configurations ─────────────────────────────────────────────────────────────
-    LANGSMITH_API_KEY: SecretStr  
+    LANGSMITH_API_KEY: SecretStr
     LANGSMITH_ENDPOINT: str
     LANGSMITH_TRACING: str
-    LANGSMITH_PROJECT: str 
+    LANGSMITH_PROJECT: str
 
     # ── OpenAI API & Models Names ─────────────────────────────────────────────────────────────
 
     OPENAI_API_KEY: SecretStr
     OPENAI_REGURAL_MODEL: str
     OPENAI_MINI_MODEL: str
-    
+
     # ── Emails Data Path ─────────────────────────────────────────────────────────────
     EMAILS_DATA_PATH: str
-    
+
     # ── PII HMAC Secret ─────────────────────────────────────────────────────────────
     PII_HMAC_SECRET: SecretStr
+
+    # ── Runtime (all optional, safe defaults) ─────────────────────────────────────
+    # Where `send_email` writes replies (stand-in for a real mail provider).
+    OUTBOX_PATH: str = "data/outbox"
+    # SQLite file the API's checkpointer persists threads/interrupts to.
+    CHECKPOINT_DB: str = "data/checkpoints.sqlite"
+    # If set, the API requires `X-API-Key: <value>` on every /api request.
+    APP_API_KEY: SecretStr | None = None
+    # Also log to stdout (containers: `docker logs` instead of files only).
+    LOG_TO_STDOUT: bool = False
+
 
 # MAIN
 settings = Settings()
 
-# Settings the observability 
+# Settings the observability
 os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY.get_secret_value()
 os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
-os.environ["LANGSMITH_TRACING"] =  settings.LANGSMITH_TRACING
+os.environ["LANGSMITH_TRACING"] = settings.LANGSMITH_TRACING
 os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT

@@ -21,6 +21,7 @@ none of these models implement `__getitem__`, so bracket access on them
 raises `TypeError: not subscriptable`. Same word ("field") for both,
 different access syntax depending on which type you're holding.
 """
+
 import operator
 from typing import Annotated, Literal, TypedDict
 
@@ -34,60 +35,57 @@ class Email(BaseModel):
     """
     Represents an email message.
     """
-    message_id: str = Field(..., 
-                        description="Unique identifier for the email message.")
-    sender: str = Field(...,
-                        description="Email address of the sender.")
-    subject: str = Field(...,
-                        description="Subject line of the email.")
-    body: str = Field(...,
-                        description="Content of the email message.")
-    to: str = Field(...,
-                    description="Email address of the recipient.")  
-    date: str = Field(...,
-                    description="Date and time when the email was sent.")
 
-class Draft(BaseModel): 
+    message_id: str = Field(..., description="Unique identifier for the email message.")
+    sender: str = Field(..., description="Email address of the sender.")
+    subject: str = Field(..., description="Subject line of the email.")
+    body: str = Field(..., description="Content of the email message.")
+    to: str = Field(..., description="Email address of the recipient.")
+    date: str = Field(..., description="Date and time when the email was sent.")
+
+
+class Draft(BaseModel):
     """
     Represents a draft email message.
     """
-    subject: str = Field(...,
-                    description="Subject line of the Draft.")
-    recipient: str = Field(...,
-                    description="Email address of the recipient.")
-    body: str = Field(...,
-                    description="Content of the draft email message.")
+
+    subject: str = Field(..., description="Subject line of the Draft.")
+    recipient: str = Field(..., description="Email address of the recipient.")
+    body: str = Field(..., description="Content of the draft email message.")
+
 
 class SmallDraft(BaseModel):
     """
     Represents a draft email message with only the subject and body.
     """
-    subject: str = Field(...,
-                    description="Subject line of the Draft.")
-    body: str = Field(...,
-                    description="Content of the draft email message.")
 
-class FlaggedEmail(BaseModel): 
-    """ 
+    subject: str = Field(..., description="Subject line of the Draft.")
+    body: str = Field(..., description="Content of the draft email message.")
+
+
+class FlaggedEmail(BaseModel):
+    """
     Represents an email message that has been flagged.
     """
+
     email: Email
-    reason: str = Field(...,
-                    description="Reason for flagging the email.")
-    category: str = Field(...,
-                    description="Category of the flagged email, if applicable.")
+    reason: str = Field(..., description="Reason for flagging the email.")
+    category: str = Field(..., description="Category of the flagged email, if applicable.")
+
 
 class SmallFlaggedEmail(BaseModel):
     """
     Represents a flagged email with only the reason.
     """
-    reason: str = Field(...,
-                        description="Reason for flagging the email message.")
+
+    reason: str = Field(..., description="Reason for flagging the email message.")
+
 
 class ClassifierResult(BaseModel):
     """
     Represents the result of a classification operation on an email.
     """
+
     # Originally `is_injection: bool` (Phase 1 threat-model lock: classifier's
     # only output is a yes/no flag). Replaced with this 3-way Literal once
     # INJECTION_DETECTION_PROMPT was written to return "ambiguous" as a real,
@@ -97,27 +95,39 @@ class ClassifierResult(BaseModel):
     # detection" apart from "erred cautious." Whether "ambiguous" is treated
     # as unsafe is a policy decision for the node that reads this result, not
     # something baked into the classifier itself.
-    injection_type: Literal["injection", "clean", "ambiguous"] = Field(...,
-                        description="The type of injection, if applicable.")
-    
+    injection_type: Literal["injection", "clean", "ambiguous"] = Field(
+        ...,
+        description=(
+            "clean = ordinary email with no attempt to instruct the AI; "
+            "injection = tries to override, extract, or redirect the AI; "
+            "ambiguous = encoded/garbled/suspicious, intent unclear."
+        ),
+    )
+
+
 class RejectionRecord(BaseModel):
     """
     Represents a record of a rejected email, including the email itself and the reason for rejection.
     """
-    message_id: str = Field(...,
-                        description="Unique identifier for the rejected email message.")
-    reason: str = Field(...,
-                        description="Reason for rejecting the email message.")
+
+    message_id: str = Field(..., description="Unique identifier for the rejected email message.")
+    reason: str = Field(..., description="Reason for rejecting the email message.")
+
 
 class State(TypedDict):
     """
     Represents the state of the email triage agent.
     """
-    authenticated: bool 
+
+    authenticated: bool
     inbox: list[Email]
-    current_email: Email | None 
+    current_email: Email | None
     draft: Draft | None
     thread_history: list[str]
-    flagged_emails: Annotated[list[FlaggedEmail], operator.add] 
-    rejection_reasons: Annotated[list[RejectionRecord], operator.add] 
+    flagged_emails: Annotated[list[FlaggedEmail], operator.add]
+    rejection_reasons: Annotated[list[RejectionRecord], operator.add]
     messages: Annotated[list[BaseMessage], add_messages]  # for tool messages, not user messages
+    # message_ids already sent or flagged in this thread -- `fetch_inbox`
+    # skips them, so a second "triage my inbox" on the same thread doesn't
+    # redraft mail that was already handled.
+    processed_ids: Annotated[list[str], operator.add]
